@@ -1,0 +1,16 @@
+
+write a shell script Git Hook commit-msg Use Case
+
+#!/bin/bash
+ 
+commit_message_file=$1
+commit_message=$(cat $commit_message_file)
+ 
+# Define the pattern for commit message validation
+pattern="^[a-zA-Z]{3}: [A-Z]{5}#[0-9]+: .+"
+
+# Validate the commit message
+if ! [[ $commit_message =~ $pattern ]]; then
+    echo "Invalid commit message. Please follow the pattern: 'dev: CIDR:<issue_number>: <message>'"
+    exit 1
+fi
