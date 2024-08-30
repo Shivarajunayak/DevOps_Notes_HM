@@ -1,0 +1,69 @@
+EKS INSTALL AND CONFIGURE MASTER AND WORKER NODES USING AWS:
+
+sudo su -
+sudo apt-get update -y
+
+STEP-1: INSTALL AWSCLI
+
+sudo apt-get install awscli -y
+aws --version
+
+To configure:
+
+$aws configure
+access-key:
+secret-access-key:
+default-region: us-east-1
+output format:
+
+STEP-2: INSTALL KUBECTL-ver1.23:
+Refer aws docs: 
+
+https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html
+https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html
+
+curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.23.17/2024-01-04/bin/linux/amd64/kubectl
+
+chmod +x ./kubectl
+
+sudo mv ./kubectl /usr/local/bin/kubectl
+
+kubectl version --client
+
+
+STEP-3: INSTALL IAM AUTHENTICATOR:
+
+https://weaveworks-gitops.awsworkshop.io/60_workshop_6_ml/00_prerequisites.md/50_install_aws_iam_auth.html
+
+curl -o aws-iam-authenticator https://amazon-eks.s3.us-west-2.amazonaws.com/1.15.10/2020-02-22/bin/linux/amd64/aws-iam-authenticator
+
+chmod +x ./aws-iam-authenticator
+sudo mv ./aws-iam-authenticator /usr/local/bin
+aws-iam-authenticator help
+
+
+STEP-4: INSTALL & CONFIGURE  EKS CLUSTER :  REFER CLASS RECORDINGS 
+ 
+Configure kubectl with EKS API-server
+
+aws eks --region us-east-1 update-kubeconfig --name ekshm6
+
+aws eks --region us-east-1 describe-cluster --name ekshm6 --query cluster.status
+
+export PATH=$PATH:/home/ubuntu/.kube/config
+export KUBECONFIG=~/.kube/config
+
+kubectl commands:
+
+kubectl get service
+kubectl get pods
+kubectl get ns
+kubectl get all
+
+AFTER CREATION OF MASTER NODE ie need 10 minutes to create we need to create WORKER NODES:
+
+TO ADD WN'S INTO THE K8S CLUSTER:
+
+SELECT compute TAG of your EKS_cluster and goto node-group options: Here ADD NODE-GROUP:
+
+CREATE minimum 3 nodes with t3.medium : It took 5 to 6 min's to create WN's.
