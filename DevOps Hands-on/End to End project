@@ -1,0 +1,104 @@
+Pre-requisites:
+Jenkins setup 1. on AWS EC2 machine
+2. EKS Cluster Setup
+3. ECR Repo
+4. AWS CLI installed
+5. Helm Installed
+6. kubectl and eksctl installed
+7. App Source Code
+
+Overview:
+1. Create EKS Cluster using eksctl command
+2. Create ECR Repo in AWS to store Docker images
+3. Create a namspace for helm deployment
+4. Create a Helm chart for spring app
+5. Modify values in helm charts to download docker image
+6. Create kubeconfig credentials in jenkins to integrate with EKS Cluster
+7. Create a jenkins pipeline with following stages
+• Build jar
+• Build docker image
+• Tag image & push it to ECR
+• Deploy to eks using helm using dynamic docker image tag
+8. Verify the deployments
+9. Access the application
+Implementation steps with commands:
+
+Jenkins Setup:
+1. Creating an AWS EC2 Ubuntu machine
+Installing and configuring Jenkins in that machine. Use below commands for installing jenkins on
+EC2 machine.
+2.
+• sudo apt update
+• sudo apt install openjdk-11-jre
+• java -version
+• curl -fsSL https://pkg.jenkins.io/debian/jenkins.io-2023.key | sudo tee \
+/usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] \
+https://pkg.jenkins.io/debian binary/ | sudo tee \
+/etc/apt/sources.list.d/jenkins.list > /dev/null
+1. Open port 8080 for the security group attached to EC2
+2. Install Necessary plugins like Docker, Docker Pipeline etc
+3. Access the Jenkins UI and verify it
+DevOps E2E Poject
+
+Install Docker & Maven in Jenkins server:
+• sudo apt update
+• sudo apt install maven
+• mvn -version
+Note: Add Maven3 as a global variable in Jenkins UI
+• sudo apt install docker.io -y
+• sudo usermod -aG docker $USER
+Installing necessary CLIs:
+
+AWS CLI:
+• curl " https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+• unzip awscliv2.zip
+• sudo ./aws/install
+HELM INSTALL:
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/gethelm-
+3
+•
+• sudo chmod 700 get_helm.sh
+• sudo ./get_helm.sh
+• helm version --client
+KUBECTL:
+curl -o kubectl https://s3.us-west-2.amazonaws.com/amazoneks/
+1.23.7/2022-06-29/bin/linux/amd64/kubectl
+•
+• chmod +x ./kubectl
+• mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$PATH:$HOME/bin
+• echo 'export PATH=$PATH:$HOME/bin' >> ~/.bashrc
+
+EKSCTL:
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_
+$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+•
+sudo mv /tmp/eksctl • /usr/local/bin
+• eksctl version
+Create jenkins user with proper permissions:
+• sudo useradd jenkins
+• sudo usermod -a -G docker jenkins
+• sudo service jenkins restart
+• sudo systemctl daemon-reload
+• sudo service docker stop
+• sudo service docker start
+Note: Install Docker and Docker Pipeline plugin in Jenkins UI.
+ Create ECR repo in AWS Console
+ Change user to jenkins user & install kubectl if its not properly installed.
+Create EKS Cluster using EKSCTL and ECR Repo from Console:
+eksctl create cluster --name web-dev --nodegroup-name web-dev-workernodes --node-type
+t2.micro --nodes 1 --managed --region ap-south-1
+•
+ Create a pipeline in Jenkins
+ Check values.yml file in mychart repo for any changes.
+Below is the GitHub URL for reference
+https://github.com/akhil-756/docker-java-web-dev.git
+Create HELM Namespace in Jenkins server:
+• kubectl get nodes
+• kubectl get pods
+• kubectl create ns helm-deployment
+• kubectl get ns
+• helm ls -n helm-deployment
+• kubectl get pods -n helm-deployment
+kubectl get svc • -n helm-deployment
+ Verify the application is accessible by copy pasting the load balancer URL.
