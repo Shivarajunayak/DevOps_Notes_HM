@@ -1,0 +1,28 @@
+Stashing
+Git provides an easy way of stashing these uncommitted changes so that we can return to them later, without having to make unnecessary commits.
+
+Git Stash
+Git stash is a super useful command that helps you save changes that you are not yet ready to commit. you can stash changes and then come back to them later.
+
+Running git stash will take all uncommitted changes (stages and unstaged) and stash them riveting the changes in your working copy.
+
+Git stash pop - To remove the most recently stashed changes in your stash and re-apply them to your working copy.
+
+Git stash apply - To apply whatever is stashed away, without removing from the stash. This can be useful if you want to apply stashed changes to multiple branches.
+
+Git stash -u (Heads up) - If you have untracked files( Files that you have never checked into git), they will not be included in the stash.
+Fortunately, You can use the -u option to tell git stash to include those untracked files.
+
+Stashing multiple times
+you can add multiple stashes onto the stack of stashes. They will all be stashed in the order you added them.
+
+git stash list - to list the multiple stash
+
+git stash drop <stash-id> - To delete a particular stash
+
+git stash clear - to clear out all stashes
+
+
+Cherry-pick 
+Bring in changes from a specific commit
+choose one or more commits
