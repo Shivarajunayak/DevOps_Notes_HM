@@ -1,0 +1,16 @@
+Prerequisites
+	• Amazon Linux 2
+	• sudo privileges
+	
+Install Go on Amazon Linux 2
+Step 1. To install the latest version of Go, update packages first.
+
+sudo yum update
+
+Step 2. Install Go.
+sudo yum install golang
+Step 3. To verify installation, run:
+
+go version
+Output:
+go version go1.15.14 linux/amd64
