@@ -1,0 +1,14 @@
+Git config --global http.sslverify false
+
+
+Git config --global http.sslverify true
+
+
+Git config --global http.backend schannel
+
+
+While update the OS packages to exclude kernal version updates
+
+Yum update --exclude=kernal -y
+Yum update --exclude=kernal -y --skip-broken
+
