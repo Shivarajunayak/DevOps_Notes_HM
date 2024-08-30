@@ -1,0 +1,23 @@
+Have you run in to the warning message below, and don't know how to fix it?
+
+Warning: Permanently added '192.168.1.1' (RSA) to the list of known hosts.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@         WARNING: UNPROTECTED PRIVATE KEY FILE!          @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+Permissions 0644 for '/path/to/my/key.pem' are too open.
+It is required that your private key files are NOT accessible by others.
+This private key will be ignored.
+bad permissions: ignore key: /path/to/my/key.pem
+Permission denied (publickey).
+
+
+How can I fix it?
+Like I said earlier, this is an easy fix. Just run:
+
+$ sudo chmod 600 /path/to/my/key.pem
+
+Keep in mind that if you keep all of your keys in the ~/.ssh directory (or any other directory, really), you may need to adjust the permissions for that directory as well. In that case, use this:
+
+$ sudo chmod 755 ~/.ssh
+
+And that's all there is to it. Now you should be able to use your key with no problems.
