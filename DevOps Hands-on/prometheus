@@ -1,0 +1,18 @@
+
+HELM INSTALLATION COMMANDS 
+wget https://get.helm.sh/helm-v3.8.0-linux...
+tar -zxvf helm-v3.8.0-linux-amd64.tar.gz
+mv linux-amd64/helm /usr/local/bin/helm
+ln -s /usr/local/bin/helm /bin/helm
+ 
+ 
+prometheus installation 
+helm repo add prometheus-community https://prometheus-community.github.i...
+helm repo update
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack(If you are using K8s Kube)
+ 
+ 
+loki installation
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm upgrade --install loki grafana/loki-stack
