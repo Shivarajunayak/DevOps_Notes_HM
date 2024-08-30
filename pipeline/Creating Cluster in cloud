@@ -1,0 +1,117 @@
+1. Create cluster (azure, aks, minikube, kubeadm)
+2. Install Azure CLI locally to access the cluster.
+3. connect to the cluster using Azure cli
+az login
+give ur Azure credentials
+az account set --subscription eed2f8a6-d12d-4d16-8aa8-8bb6b7cb5cda
+az aks get-credentials --resource-group demo-rg --name demo cluster
+Sucess - Merged "demo cluster" as the current context in C:\Users\arti.jain\.kube\config
+ 
+kubectl config current-context
+ 
+4. Create a gitlab runner. 
+Req- linux machine (ec2)
+ 
+5. Adding container registry
+docker login registry.gitlab.com -u -p 
+docker build -t registry.gitlab.com/artidemo/docker-demo .
+docker push registry.gitlab.com/artidemo/docker-demo
+ 
+6. Things requried to be installed inside ec2  gitlab runner 
+a. git
+b. docker
+c. kubectl
+d. az cli
+ 
+7. For adding agent to kubernetes cluster follow steps: 
+Go to operate-->kubernetes cluster--> create agent
+Create a empty file in root folder as : .gitlab.agents.mygitlabagent.config.yaml
+add this content:
+ci_access:
+  projects:
+    - id: artidemo/docker-demo
+ 
+Add a agent for k8s cluster.
+helm repo add gitlab https://charts.gitlab.io
+helm repo update
+helm upgrade --install mygitlabagent gitlab/gitlab-agent \
+    --namespace gitlab-agent-mygitlabagent \
+    --create-namespace \
+    --set image.tag=v16.4.0 \
+    --set config.token=glagent-s1gwkyRccpCS96ydwy3Zo6mWzt7yfBv34K1bx7vTaXorTxX2xw \
+    --set config.kasAddress=wss://kas.gitlab.com
+ 
+8. Create a .gitlab.ci.yaml file:
+ 
+stages:
+   - build 
+   - test
+   - deploy
+ 
+.docker_template: &template
+  tags:
+     - linux
+  timeout: 1 hours 30 minutes
+  rules:
+     - if: $CI_COMMIT_BRANCH=="main"     
+ 
+docker_build_job:
+   <<: *template
+   stage : build    
+   before_script:
+      - echo 'Build started' 
+      - sudo docker login registry.gitlab.com -u aartijain843 -p glpat-vWz9uotqeaaM-MpDqzng
+   script:
+      - sudo docker build -t registry.gitlab.com/artidemo/docker-demo .
+      - sudo docker push registry.gitlab.com/artidemo/docker-demo
+   artifacts:
+      paths:
+         - $CI_PROJECT_DIR 
+      exclude:
+         - Dockerfile  
+      expire_in: 1 week  
+ 
+docker_test_job:
+   <<: *template
+   stage : test
+   needs: []   
+   before_script:
+      - echo 'Image Verification'
+   script:
+      - sudo docker images
+      - sudo docker ps -a
+      - sudo docker image inspect registry.gitlab.com/artidemo/docker-demo  
+ 
+docker_deploy_job:
+   <<: *template
+   stage: deploy
+   script: 
+     - "sudo docker rm -f $(sudo docker ps -a -q)" 
+     - docker run -itd -p 8090:80 registry.gitlab.com/artidemo/docker-demo
+   environment:
+      name: prod
+      url: http://65.0.7.59:8090
+ 
+kube_deploy_job:
+   <<: *template
+   stage: deploy
+   image:
+     name: bitnami/kubectl:latest
+     entrypoint: ['']
+   variables:
+    KUBE_CONTEXT: my-context # The name to use for the new context
+    AGENT_ID: 1074539 # replace with your agent's numeric ID 
+   before_script:
+    - kubectl config set-credentials agent:$AGENT_ID --token="ci:${AGENT_ID}:${CI_JOB_TOKEN}"
+    - kubectl config set-context "$KUBE_CONTEXT" --cluster=gitlab --user="agent:${AGENT_ID}"
+    - kubectl config use-context "$KUBE_CONTEXT" 
+   script:
+    - kubectl get namespaces 
+    - kubectl create secret docker-registry regcred --docker-server=registry.gitlab.com        --docker-username=aartijain843 --docker-password=glpat-vWz9uotqeaaM-MpDqzng  
+    - kubectl apply -f deployment.yaml
+    - kubectl get pods 
+   environment:
+    name: production
+    kubernetes:
+      namespace: default
+GitLab Helm Charts
