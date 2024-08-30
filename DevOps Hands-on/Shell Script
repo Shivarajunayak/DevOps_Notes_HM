@@ -1,0 +1,10 @@
+	• Write a shell script to find the .log files & error message pattern in a directory.
+
+#!/bin/bash
+ls | grep -i log>output
+while read list
+do
+name="echo list|awk -F"."`{print$1}`"
+find . -type f iname .log
+grep -i "error"* $log
+done<output
