@@ -1,0 +1,112 @@
+trigger:
+  branches:
+    include:
+      - feature_flink_data_pipeline
+pool:
+  name: eks-linux-pool
+resources:
+  - repo: self
+variables:
+  System.debug: true
+  tag: '$(Build.BuildId)'
+  group: AzureDevopsCredsLibrary-DEV
+  NON_PROD_MAIN_ACCOUNT_ID: '905418263290'
+  ROLE_NAME: 'hmcl-terraform-assume-role'
+stages:
+  - stage: Copy_Files
+    displayName: "Copy Files Stage"
+    jobs:
+      - job: Copy
+        displayName: Copy Job
+        steps:
+          - script: |
+              echo "Copy files step"
+            displayName: 'Copy Files Step'
+  - stage: Build_JAR
+    displayName: "Build JAR Stage"
+    dependsOn: Copy_Files
+    jobs:
+      - job: Build
+        displayName: Build Job
+        steps:
+          - script: |
+              # Install OpenJDK 11
+              echo "##[section]Installing OpenJDK 11"
+              sudo apt-get update
+              sudo apt-get install -y openjdk-11-jdk
+              java -version
+              # Maven go-offline (resolve dependencies)
+              echo "##[section]Running: mvn dependency:go-offline"
+              mvn dependency:go-offline
+              # Maven clean install (build without tests)
+              echo "##[section]Running: mvn clean install -DskipTests"
+              mvn clean install -DskipTests
+              pwd
+            displayName: 'Build JAR'
+          - task: CopyFiles@2
+            displayName: "Copy Artifacts Step"
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)/target'
+              Contents: '**/*.jar'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/target'
+          - script: |
+              echo "Listing contents of Build.ArtifactStagingDirectory:"
+              ls -R $(Build.ArtifactStagingDirectory)
+            displayName: "List directory contents for debugging"
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish Build Artifacts"
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/target'
+              ArtifactName: 'artifact'
+              publishLocation: 'Container'
+  - stage: Upload_Files
+    displayName: "Upload Files Stage"
+    dependsOn: Build_JAR
+    jobs:
+      - job: S3Upload
+        displayName: S3 Upload Job
+        steps:
+          - checkout: none
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: 'current'
+              downloadType: 'specific'
+              artifactName: 'artifact'
+              downloadPath: '$(Build.ArtifactStagingDirectory)/downloaded'
+          - script: |
+              echo "Listing contents of downloaded artifact directory:"
+              ls -R $(Build.ArtifactStagingDirectory)/downloaded
+            displayName: "List downloaded artifact contents"
+          - task: Bash@3
+            displayName: "S3 Upload Task via Bash"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                ROLE_ARN="arn:aws:iam::$(NON_PROD_MAIN_ACCOUNT_ID):role/$(ROLE_NAME)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                S3_BUCKET_NAME="jarflinkbucket"
+                LOCAL_FILE_PATH="$(Build.ArtifactStagingDirectory)/downloaded/artifact/my-java-project-1.0-SNAPSHOT.jar"
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ] || [ -z "${AWS_SESSION_TOKEN}" ]; then
+                  echo "Error assuming the role or retrieving credentials. Exiting..."
+                  exit 1
+                fi
+                pwd
+                ls -alhrt $(Build.ArtifactStagingDirectory)/downloaded
+                aws s3 cp ${LOCAL_FILE_PATH} "s3://${S3_BUCKET_NAME}/"
+                if [ $? -eq 0 ]; then
+                  echo "File uploaded successfully"
+                else
+                  echo "File upload failed"
+                  exit 1
+                fi
+                unset AWS_ACCESS_KEY_ID
+                unset AWS_SECRET_ACCESS_KEY
+                unset AWS_SESSION_TOKEN
