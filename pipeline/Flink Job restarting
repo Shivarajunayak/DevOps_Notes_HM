@@ -1,0 +1,346 @@
+trigger:
+  branches:
+    include:
+    - feature_flink_data_pipeline
+
+pool:
+  name: eks-linux-pool
+
+resources:
+  - repo: self
+
+variables:
+- name: buildNumber
+  value: '$(Build.BuildId)'
+- name: System.Debug
+  value: false
+- group: DataLakeLibrary
+- name: BRANCH_NAME
+  value: $[replace(variables['Build.SourceBranch'], 'refs/heads/', '')]
+- name: LOWERCASE_BRANCH_NAME
+  value: 'dev'
+
+#  value: $[lower(replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
+- name: FLINK_APPLICATION_NAME
+  value: 'deserializer'
+
+  # - name: FLINK_APPLICATION_NAME
+  # value: $[replace(variables['Build.Repository.Name'], 'thor-data-flink-', '')]
+  # TARGET_BRANCH_NAME: $[replace(variables['System.PullRequest.TargetBranch'], 'refs/heads/', '')]
+  # LOWERCASE_TARGET_BRANCH_NAME: $[lower(replace(variables['System.PullRequest.TargetBranch'], 'refs/heads/', ''))]
+
+stages:
+  - stage: Copy_Files
+    displayName: "Copy Files Stage"
+    jobs:
+      - job: Copy
+        displayName: Copy Job
+        steps:
+          - script: |
+              echo "Copy files step"
+            displayName: 'Copy Files Step'
+  - stage: Build_JAR
+    displayName: "Build JAR Stage"
+    dependsOn: Copy_Files
+    jobs:
+      - job: Build
+        displayName: Build Job
+        steps:
+          - script: |
+              # Install OpenJDK 11
+              echo "##[section]Installing OpenJDK 11"
+              sudo apt-get update2
+              sudo apt-get install -y openjdk-11-jdk
+              java -version
+              # Maven go-offline (resolve dependencies)
+              echo "##[section]Running: mvn dependency:go-offline"
+              mvn dependency:go-offline
+              # Maven clean install (build without tests)
+              echo "##[section]Running: mvn clean install -DskipTests"
+              mvn clean install -DskipTests
+              pwd
+            displayName: 'Build JAR'
+          - task: CopyFiles@2
+            displayName: "Copy Artifacts Step"
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)/target'
+              Contents: '**/*.jar'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/target'
+          - script: |
+              echo "Listing contents of Build.ArtifactStagingDirectory:"
+              ls -R $(Build.ArtifactStagingDirectory)
+            displayName: "List directory contents for debugging"
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish Build Artifacts"
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/target'
+              ArtifactName: 'artifact'
+              publishLocation: 'Container'
+  - stage: Upload_Files
+    displayName: "Upload Files Stage"
+    dependsOn: Build_JAR
+    jobs:
+      - job: S3Upload
+        displayName: S3 Upload Job
+        steps:
+          - checkout: none
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: 'current'
+              downloadType: 'specific'
+              artifactName: 'artifact'
+              downloadPath: '$(Build.ArtifactStagingDirectory)/downloaded'
+          - script: |
+              echo "Listing contents of downloaded artifact directory:"
+              ls -R $(Build.ArtifactStagingDirectory)/downloaded
+            displayName: "List downloaded artifact contents"
+          - task: Bash@3
+            displayName: "S3 Upload Task"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                # Determine the target account and bucket based on the branch
+                if [ "$(Build.SourceBranch)" == "refs/heads/feature_flink_data_pipeline" ]; then
+                    ACCOUNT_ID="$(dev_account_id)"
+                    S3_BUCKET_NAME="$(DEV_GLUE_S3_BUCKET)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/uat" ]; then
+                    ACCOUNT_ID="$(uat_account_id)"
+                    S3_BUCKET_NAME="$(UAT_FLINK_S3_BUCKET_NAME)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/qa" ]; then
+                    ACCOUNT_ID="$(uat_account_id))"
+                    S3_BUCKET_NAME="$(QA_FLINK_S3_BUCKET_NAME)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/prod" ]; then
+                    ACCOUNT_ID="$(prod_account_id)"
+                    S3_BUCKET_NAME="$(PROD_FLINK_S3_BUCKET_NAME)"
+                else
+                    echo "Branch not recognized for S3 upload"
+                    exit 1
+                fi
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$(ROLE_NAME)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                LOCAL_FILE_PATH="$(Build.ArtifactStagingDirectory)/downloaded/artifact/my-java-project-1.0-SNAPSHOT.jar"
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ] || [ -z "${AWS_SESSION_TOKEN}" ]; then
+                  echo "Error assuming the role or retrieving credentials. Exiting..."
+                  exit 1
+                fi
+                pwd
+                ls -alhrt $(Build.ArtifactStagingDirectory)/downloaded
+                aws s3 cp ${LOCAL_FILE_PATH} "s3://${S3_BUCKET_NAME}/"
+                if [ $? -eq 0 ]; then
+                  echo "File uploaded successfully"
+                else
+                  echo "File upload failed"
+                  exit 1
+                fi
+                unset AWS_ACCESS_KEY_ID
+                unset AWS_SECRET_ACCESS_KEY
+                unset AWS_SESSION_TOKEN
+  - stage: Restart_Flink_Job
+    displayName: "Restart Flink Job Stage"
+    dependsOn: Upload_Files
+    jobs:
+      - job: RestartFlink
+        displayName: Restart Flink Job
+        steps:
+          - checkout: none
+          - task: Bash@3
+            displayName: "Check Last Update Time of Flink Job"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                # Determine the target account
+                if [ "$(Build.SourceBranch)" == "refs/heads/feature_flink_data_pipeline" ]; then
+                  ACCOUNT_ID="$(dev_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/uat" ]; then
+                  ACCOUNT_ID="$(uat_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/qa" ]; then
+                  ACCOUNT_ID="$(uat_account_id))"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/prod" ]; then
+                  ACCOUNT_ID="$(prod_account_id)"
+                else
+                  echo "Branch not recognized for Check Last Update Time of Flink Job"
+                  exit 1
+                fi
+                set -e
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$(role_name)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                echo "Checking last update time for Flink job ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} in region ${AWS_REGION}"
+                LAST_UPDATE_TIME=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.LastUpdateTimestamp' --output text --region ${AWS_REGION})
+                echo "Last update time of Flink job: ${LAST_UPDATE_TIME}"
+                export LAST_UPDATE_TIME
+          - task: Bash@3
+            displayName: "Stop Flink Job if Running"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                # Determine the target account
+                if [ "$(Build.SourceBranch)" == "refs/heads/feature_flink_data_pipeline" ]; then
+                  ACCOUNT_ID="$(dev_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/uat" ]; then
+                  ACCOUNT_ID="$(uat_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/qa" ]; then
+                  ACCOUNT_ID="$(uat_account_id))"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/prod" ]; then
+                  ACCOUNT_ID="$(prod_account_id)"
+                else
+                  echo "Branch not recognized for Stop Flink Job"
+                  exit 1
+                fi
+                set -e
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$(role_name)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                function wait_for_state {
+                  local desired_state=$1
+                  while true; do
+                    local state=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.ApplicationStatus' --output text --region ${AWS_REGION})
+                    if [[ "$state" == "$desired_state" ]]; then
+                      echo "Application is in desired state: $state"
+                      break
+                    elif [[ "$state" == "STOPPING" || "$state" == "STARTING" ]]; then
+                      echo "Application is in state: $state. Waiting..."
+                      sleep 30
+                    else
+                      echo "Unexpected state: $state. Exiting..."
+                      exit 1
+                    fi
+                  done
+                }
+                CURRENT_STATE=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.ApplicationStatus' --output text --region ${AWS_REGION})
+                export CURRENT_STATE
+                if [[ "$CURRENT_STATE" == "RUNNING" ]]; then
+                  echo "Stopping Flink job for application ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} in region ${AWS_REGION}"
+                  stop_output=$(aws kinesisanalyticsv2 stop-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --region ${AWS_REGION} 2>&1)
+                  stop_exit_code=$?
+                  echo "Stop Flink job command output: $stop_output"
+                  if [[ $stop_exit_code -eq 0 ]]; then
+                    echo "Flink job stopped successfully"
+                    wait_for_state "READY"
+                  else
+                    echo "Failed to stop Flink job. AWS CLI output: $stop_output"
+                    exit $stop_exit_code
+                  fi
+                else
+                  echo "Application is not in RUNNING state. No need to stop."
+                fi
+          - task: Bash@3
+            displayName: "Start Flink Job"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                # Determine the target account
+                if [ "$(Build.SourceBranch)" == "refs/heads/feature_flink_data_pipeline" ]; then
+                  ACCOUNT_ID="$(dev_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/uat" ]; then
+                  ACCOUNT_ID="$(uat_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/qa" ]; then
+                  ACCOUNT_ID="$(uat_account_id))"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/prod" ]; then
+                  ACCOUNT_ID="$(prod_account_id)"
+                else
+                  echo "Branch not recognized for Start Flink Job"
+                  exit 1
+                fi
+                set -e
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$(role_name)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                function wait_for_state {
+                  local desired_state=$1
+                  while true; do
+                    local state=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.ApplicationStatus' --output text --region ${AWS_REGION})
+                    if [[ "$state" == "$desired_state" ]]; then
+                      echo "Application is in desired state: $state"
+                      break
+                    elif [[ "$state" == "STOPPING" || "$state" == "STARTING" ]]; then
+                      echo "Application is in state: $state. Waiting..."
+                      sleep 30
+                    else
+                      echo "Unexpected state: $state. Exiting..."
+                      exit 1
+                    fi
+                  done
+                }
+                CURRENT_STATE=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.ApplicationStatus' --output text --region ${AWS_REGION})
+                if [[ "$CURRENT_STATE" == "READY" ]]; then
+                  echo "Starting Flink job for application ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} in region ${AWS_REGION}"
+                  start_output=$(aws kinesisanalyticsv2 start-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --run-configuration "{ \"FlinkRunConfiguration\": { \"AllowNonRestoredState\": true } }" --region ${AWS_REGION} 2>&1)
+                  start_exit_code=$?
+                  echo "Start Flink job command output: $start_output"
+                  if [[ $start_exit_code -eq 0 ]]; then
+                    echo "Flink job started successfully"
+                    wait_for_state "RUNNING"
+                  else
+                    echo "Failed to start Flink job. AWS CLI output: $start_output"
+                    exit $start_exit_code
+                  fi
+                else
+                  echo "Application is not in READY state. Current state: $CURRENT_STATE"
+                fi
+          - task: Bash@3
+            displayName: "Check Flink Job Status After Restart"
+            inputs:
+              targetType: 'inline'
+              script: |
+                #!/bin/bash
+                # Determine the target account
+                if [ "$(Build.SourceBranch)" == "refs/heads/feature_flink_data_pipeline" ]; then
+                  ACCOUNT_ID="$(dev_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/uat" ]; then
+                  ACCOUNT_ID="$(uat_account_id)"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/qa" ]; then
+                  ACCOUNT_ID="$(uat_account_id))"
+                elif [ "$(Build.SourceBranch)" == "refs/heads/prod" ]; then
+                  ACCOUNT_ID="$(prod_account_id)"
+                else
+                  echo "Branch not recognized for Check Flink Job Status"
+                  exit 1
+                fi
+                set -e
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$(role_name)"
+                ROLE_SESSION_NAME="CrossAccountS3UploadSession"
+                DURATION_SECONDS=900
+                CREDENTIALS=$(aws sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_SESSION_NAME} --query "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]" --output text --duration-seconds ${DURATION_SECONDS})
+                unset AWS_PROFILE
+                export AWS_ACCESS_KEY_ID="$(echo $CREDENTIALS | awk '{print $1}')"
+                export AWS_SECRET_ACCESS_KEY="$(echo $CREDENTIALS | awk '{print $2}')"
+                export AWS_SESSION_TOKEN="$(echo $CREDENTIALS | awk '{print $3}')"
+                aws sts get-caller-identity
+                echo "Checking status of Flink job ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} in region ${AWS_REGION}"
+                NEW_LAST_UPDATE_TIME=$(aws kinesisanalyticsv2 describe-application --application-name ${ENTITY_NAME}-${LOWERCASE_BRANCH_NAME}-${FLINK_APPLICATION_NAME} --query 'ApplicationDetail.LastUpdateTimestamp' --output text --region ${AWS_REGION})
+                if [[ "$NEW_LAST_UPDATE_TIME" != "$LAST_UPDATE_TIME" ]]; then
+                  echo "Flink job successfully Restarted."
+                else
+                  echo "Flink job Restart failed."
+                  exit 1
+                fi
