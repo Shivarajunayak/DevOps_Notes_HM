@@ -1,0 +1,44 @@
+ Primary Installations
+	1. Install Chocolatey.
+Install Chocolatey on the Window using the below guide
+https://phoenixnap.com/kb/chocolatey-windows
+	1. Open  power shell (open as admin) and Use choco to install the required dependencies
+	choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+	choco install ninja gperf python git dtc-msys2 wget 7zip unzip
+	1. Close the window and open a new cmd.exe window as a regular user to continue.
+Get Zephyr and install Python dependencies
+	1. Create a new virtual environment:
+	cd %HOMEPATH%
+	1. python -m venv zephyr-v3.2.0\.venv
+	2. Activate the virtual environment:
+	zephyr-v3.2.0\.venv\Scripts\activate.bat
+	1. Install west:
+	pip install west
+	1. Get the Zephyr source code:
+	west init --mr v3.2.0 zephyr-v3.2.0
+	cd zephyr-v3.2.0
+	cd zephyr
+	west update
+	1. Export a Zephyr CMake package. This allows CMake to automatically load boilerplate code required for building Zephyr applications.
+	west zephyr-export
+	1. Zephyr’s scripts\requirements.txt file declares additional Python dependencies. Install them with pip.
+	Go to zephyr-v3.2.0\zephyr\scripts\
+	pip install -r scripts\requirements.txt
+Install Zephyr SDK
+	1. Open a cmd.exe window by pressing the Windows key typing “cmd.exe”.
+	2. Download the latest Zephyr SDK bundle:
+cd %HOMEPATH%
+	3. wget  https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.15.2/zephyr-sdk-0.15.2_windows-x86_64.zip
+ 
+	1. Extract the Zephyr SDK bundle archive:
+	7z x zephyr-sdk-0.15.2_windows-x86_64.zip
+	Run the Zephyr SDK bundle setup script:
+	cd zephyr-sdk-0.15.2
+	setup.cmd
+	
+	
+	Additional steps
+	git clone edge rtos
+	 -> run setup bat file -> provide 1 as a input
+	git clone smart filter  (dev branch) give build cmd
+	
