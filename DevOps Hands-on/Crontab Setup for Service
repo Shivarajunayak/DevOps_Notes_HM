@@ -1,0 +1,62 @@
+• Create a file under / directory 
+Name: docker_restart_test1.sh
+
+	
+
+• Add the below content for the shell script file docker_restart_test1.sh
+
+[root@ip-10-0-1-217 /]# cat docker_restart_test1.sh 
+#!/bin/bash
+
+# Define the names of the Docker containers
+containers=("notificationmanager" "messageconsumer" "notificationbatch" "notificationapi")
+
+# Loop through the containers
+for container in "${containers[@]}"; do
+# Check the status of the container
+status=$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null)
+
+# If the container is not running, restart it
+if [[ "$status" != "running" ]]; then
+echo "Container $container is not running. Restarting..."
+docker restart "$container"
+else
+echo "Container $container is running."
+fi
+done
+
+• Install the crontab using the below command
+yum install cronie cronie-anacron 
+
+• Edit the crontab and setup the crontab job
+Ex: Below is the crontab to check every 10 minutes if the container is stopped state then using the shell script container will start automatically.
+
+[root@ip-10-0-1-217 /]# crontab -e
+*/10  *  *  *  * /docker_restart_test1.sh
+
+[root@ip-10-0-1-217 /]# crontab -l
+*/10  *  *  *  * /docker_restart_test1.sh
+
+
+• If I want to start all the containers refer to the shell script 
+[root@ip-10-0-1-9 /]# cat docker_restart_test2.sh 
+#!/bin/bash
+
+# Get the list of stopped containers
+stopped_containers=$(docker ps -q -f "status=exited")
+
+# Check if any stopped containers exist
+if [ -z "$stopped_containers" ]; then
+echo "No stopped containers found."
+exit 0
+fi
+
+echo "Starting stopped containers..."
+
+# Loop through each stopped container and start it
+for container_id in $stopped_containers; do
+docker start "$container_id"
+echo "Started container: $container_id"
+done
+
+echo "All stopped containers have been started."
