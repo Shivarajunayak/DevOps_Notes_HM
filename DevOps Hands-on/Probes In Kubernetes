@@ -1,0 +1,16 @@
+𝐏𝐫𝐨𝐛𝐞𝐬 𝐢𝐧 𝐊𝐮𝐛𝐞𝐫𝐧𝐞𝐭𝐞𝐬 🚀
+
+Probes in Kubernetes are used to monitor the health of a pod and its containers. They can be used to determine whether a pod is ready to receive traffic 🚦, whether a container is alive 💓, and whether a container is ready to start 🏁.
+
+𝐓𝐲𝐩𝐞𝐬 𝐨𝐟 𝐏𝐫𝐨𝐛𝐞𝐬
+
+There are three types of probes in Kubernetes:
+
+𝐑𝐞𝐚𝐝𝐢𝐧𝐞𝐬𝐬 𝐩𝐫𝐨𝐛𝐞𝐬: Readiness probes are used to determine whether a pod is ready to receive traffic. A pod is considered ready if all of its readiness probes succeed. 🟢
+
+𝐋𝐢𝐯𝐞𝐧𝐞𝐬𝐬 𝐩𝐫𝐨𝐛𝐞𝐬: Liveness probes are used to determine whether a container is alive. If a container's liveness probe fails, the container is restarted. ♻️
+
+𝐒𝐭𝐚𝐫𝐭𝐮𝐩 𝐩𝐫𝐨𝐛𝐞𝐬: Startup probes are used to determine whether a container is ready to start. If a container's startup probe fails, the container is not started. 🚫
+
+
+
